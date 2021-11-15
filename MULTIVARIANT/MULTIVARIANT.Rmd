@@ -1,0 +1,531 @@
+---
+title: "MULTI"
+output: 
+  learnr::tutorial:
+          allow_skip: true
+runtime: shiny_prerendered
+---
+```{r setup, include=FALSE}
+library(learnr)
+library(ggplot2)
+library(vegan)
+library(tidyverse)
+library(broom)
+library(datarium)
+library(ggeffects)
+library(car)
+library(vegan)
+library(BiodiversityR)
+
+
+gradethis::gradethis_setup()
+knitr::opts_chunk$set(include= TRUE)
+
+#DATA: Sitio ----
+sitio <- c("Polo norte", "Sahara", "Tu casa")
+bueno <- c("No se derrite helados", "Te pones morenito", "tranquilisimo")
+malo <- c("hace rasca", "muerte por insolación", "aburrido")
+puntuacion <- c(3,4,8) 
+
+sitios.data <- data.frame(sitio, bueno,malo, puntuacion)
+
+#DATA: loyn ----
+loyn.data <- read.csv("./data/loyn.csv", #Nombre del dataset. Yo lo he puesto en una subcarpeta llamada "data". Si está en el mismo sitio exactamente simplemente hay que poner el nombre. "loyn.csv". 
+                  skip=14, #Líneas antes de la primera linea real
+                  sep=",", #Separador de valores
+                  dec="." #Spearador decimal
+                  )
+# FUN: SE ----
+se <- function(x) sqrt(var(x) / length(x))
+
+# DATA: T example ----
+
+mean <- mean(loyn.data$ABUND) #Media
+SE<- se(loyn.data$ABUND) #Error estándar
+ref <- 15 #Valor para comparar
+tobs <- (mean- ref)/ SE #Calculo T observado
+tobs
+p.data <- rnorm(5000,  11, 2)
+#DATA: exams ----
+exams.data <- read.csv("./data/StudentsPerformance.csv", sep=",", dec=".")
+
+exams.data$exams.mean <- (exams.data$math.score + exams.data$reading.score + exams.data$writing.score) /3
+
+lmodexams  <- lm(writing.score~math.score, exams.data)
+
+exams.error <- augment(lmodexams)
+
+#DATA: marketing ----
+sales.data <- marketing
+
+#Data: PIZZA -----
+pizza.data <- read.csv("./data/Pizza.csv")
+
+#Data: SPE
+
+
+spe.data<- read.csv2("./data/spe.csv", row.names=1)
+
+spe.data <- spe.data[order(colSums(spe.data), decreasing = TRUE)<15]
+spe.data <- spe.data[rowSums(spe.data)>0,]
+
+```
+
+
+# Multivariant 
+
+## PCA
+
+Un Análisis de Componentes Principales es un método para reducir la dimensionalidad de un conjunto de variables NUMÉRICAS CONTINUAS. La idea es, a partir de todas las variables, crear nuevos ejes a partir de combinaciones lineales que resuman al máximo posible la variabilidad de las muestras. 
+
+[Esta respuesta de stack-overflow me parece genial para entender conceptualmente la PCA](https://stats.stackexchange.com/questions/2691/making-sense-of-principal-component-analysis-eigenvectors-eigenvalues)
+
+<iframe width="560" height="315" src="https://www.youtube.com/embed/HMOI_lkzW08" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+
+
+En el mundo de la ecología esto se aplica a la matriz de variables ambientales, pero nosotros vamos a trabajar con `pizza.data`, un dataset real sobre características de pizzas. 
+
+
+### 1. Matriz de correlaciones
+
+Para que tenga sentido aplicar una PCA las variables deben estar mínimamente correlacionadas. 
+
+Miramos los datos: 
+```{r headpizza, exercise=TRUE}
+head(pizza.data) 
+```
+
+La primera y la segunda variable no nos interesan por ahora. Para ver si las variables están correlacionadas me gusta utilizar el paquete PerformanceAnalytics ya que preenta mucha información de forma resumida. Se puede observar como hay correlaciones muy elevadas.
+
+```{r corpizza, exercise=TRUE}
+PerformanceAnalytics::chart.Correlation(pizza.data[,-c(1,2)])
+```
+
+### 2. Transformar los datos
+
+No hace falta que los datos sean estupendamente normales, pero si simétricos. Parece que las variables. Si vemos que esto no se cumple podemos obtar por transformar los datos (log o sqrt)
+
+```{r boxPCA, exercise=TRUE}
+
+#Escalamos los datos dentro del plot para poder ver bien todas las distribuciones, 
+boxplot(scale(pizza.data[,-c(1,2)]))
+```
+
+
+### 3. PCA
+
+Creamos una PCA con la función `rda()` de vegan. Importante seleccionar solo las variables numéricas que queremos resumir, así que excluimos la columna 1 y 2 que son la marca de pizza y el ID de la muestra. 
+
+```{r pcamodel, exercise=TRUE}
+library(vegan)
+
+#Creamos objeto PCA
+pca.out <- rda(pizza.data[,-c(1,2)], 
+               scale=T) #IMPORTANTES scale=TRUE para que todas las variables se necuentren en el mismo rango (media = 0, sd=1).
+
+summary(pca.out)
+```
+
+
+El summary de la PCA nos indica la posición de cada muestra en cada componente principal, así como la posición de cada variable. Podemos quedarnos estos datos en forma de datasets para construir nuestro biplot. 
+
+_Biplot= muestras + variables_
+
+
+_Ejercicio: Mírate bien cómo he generado el biplot. Ahora intenta colorear los puntos en función de la marca de pizza (pizza.data$brand)_
+```{r pcamodelb, exercise=TRUE}
+pca.out <- rda(pizza.data[,-c(1,2)], scale=TRUE)
+#Guardamos el summary y lo que nos interesa del summary 
+pca.sum <- summary(pca.out) #Salida del summary tiene especies y locs
+pca.data <- data.frame(pca.sum$sites)  #DATASET con posición de muestra
+pca.var <- data.frame(pca.sum$species) #Dataset con posición de cada variable
+
+
+ggplot(pca.data, aes(x=PC1, y=PC2)) + 
+  geom_point() +
+  geom_segment(data=pca.var, # geom_segment crea flechas
+               aes(x=0, y=0,xend=PC1/5, yend=PC2/5), #divido por cinco por una cuestión estética. Lo que importa es la dirección así que no afecta la interpretación. 
+               arrow = arrow(),
+               col="coral3") + 
+  geom_label(data=pca.var ,
+             aes(x=PC1/4.7, y=PC2/4.7, 
+                 label=row.names(pca.var)))
+```
+
+```{r pcamodelb-solution}
+pca.out <- rda(pizza.data[,-c(1,2)], scale=TRUE)
+#Guardamos el summary y lo que nos interesa del summary 
+pca.sum <- summary(pca.out) #Salida del summary tiene especies y locs
+pca.data <- data.frame(pca.sum$sites)  #DATASET con posición de muestra
+pca.var <- data.frame(pca.sum$species) #Dataset con posición de cada variable
+
+
+ggplot(pca.data, aes(x=PC1, y=PC2)) + 
+  geom_point(aes(col=pizza.data$brand)) +
+  geom_segment(data=pca.var, # geom_segment crea flechas
+               aes(x=0, y=0,xend=PC1/5, yend=PC2/5), #divido por cinco por una cuestión estética. Lo que importa es la dirección así que no afecta la interpretación. 
+               arrow = arrow(),
+               col="coral3") + 
+  geom_label(data=pca.var ,
+             aes(x=PC1/4.7, y=PC2/4.7, 
+                 label=row.names(pca.var)))
+```
+
+
+
+Mira el resultado anterior e intenta responder las siguientes preguntas. 
+
+```{r quizpca, echo=FALSE, include= TRUE}
+quiz(
+  question("¿Qué marcas de pizza parecen tener un contenido mayor de carbohidratos ?",
+    answer("A, B y C"),
+    answer("I y J"),
+    answer("E, F y G", correct = TRUE),
+    answer("C y D")
+  ),
+  question("¿Qué variable está más negativamente relacionada con las calorias (cal)",
+    answer("La humedad (mois)", correct = TRUE),
+    answer("La proteína (prot)"),
+    answer("La grada (fat)"),
+    answer("El sodio (sodium)")
+  ),
+  question("¿Qué variable está más positivamente relacionada con el contenido de proteína (prot)? ",
+    answer("cal"),
+    answer("ash", correct = TRUE),
+    answer("mois"),
+    answer("sodium")
+  ),
+  question("¿Qué marca de pizas se diferencia más de todo el resto? ",
+    answer("B"),
+    answer("J"),
+    answer("H"),
+    answer("A", correct = TRUE)
+  ),
+  question("¿Qué variable parece determinar con más fuerza el valor del PC2",
+    answer("cal"),
+    answer("ash"),
+    answer("carb"),
+    answer("mois", correct = TRUE)
+  )
+)
+```
+
+### Selección del número correcto de dimensiones
+
+En función de lo fuertemente que estén correlacionadas las variables los componentes principales explicarán una proporción mayor o menor de la variabilidad. Los componentes principales están ordenados de más a menos explicativos. El PC1, por definición, es la combinación lineal de variables que explica más cantidad de la variabilidad en las muestras. 
+
+
+```{r propPCA, exercise=TRUE}
+pca.out <- rda(pizza.data[,-c(1,2)])
+
+#Proporción explicada por cada PC + eigenvalue
+summary(pca.out)$cont
+
+#Representación gráfica
+prop.exp <- data.frame(t(summary(pca.out)$cont$importance))  
+prop.exp$PC <- row.names(prop.exp)
+
+
+ggplot(prop.exp, aes(x=PC, y=Proportion.Explained)) + geom_col()+
+  geom_label(aes(label=round(Cumulative.Proportion,4)))
+
+```
+
+### {.tabset}
+
+#### kaiser-Guttman criterion 
+
+Es el criterio más sencillo. Simplemente nos dice que nos quedemos con aquellos _eigenvalues_ superiores a 1. 
+
+```{r pcakg, exercise=TRUE}
+pca.out <- rda(pizza.data[,-c(1,2)], scale=TRUE)
+
+#Nos aprovechamos de que en R TRUE = 1 y FALSE = O
+sum(pca.out$CA$eig > 1) # Sumamos los 1 (= true) 
+
+
+```
+
+Podemos indicarlo en el plot anterior: 
+```{r pcakgb, exercise=TRUE}
+pca.out <- rda(pizza.data[,-c(1,2)], scale=TRUE)
+
+prop.exp <- data.frame(t(summary(pca.out)$cont$importance))  
+prop.exp$PC <- row.names(prop.exp)
+
+prop.exp$selected <- ifelse(prop.exp$Eigenvalue>1,"selected", "not selected")
+
+#Cambio fill en función de si está o no seleccionado
+ggplot(prop.exp, aes(x=PC, y=Eigenvalue)) + geom_col(aes(fill=selected))+
+  geom_hline(yintercept=1, lty=2, col="red")+
+  ggtitle("K-G criterion")
+```
+
+#### Broken stick
+
+
+Consiste en comparar la variabilidad explicada por cada componente con la variabilidad total dividida de forma aleatoria en tantos segmentos como componentes principales hay en el PCA.
+
+
+```{r pcabs, exercise=TRUE}
+pca.out <- rda(pizza.data[,-c(1,2)], scale=TRUE)
+
+prop.exp <- data.frame(t(summary(pca.out)$cont$importance))  
+prop.exp$PC <- row.names(prop.exp)
+prop.exp$brokenstick <- bstick(pca.out)
+
+#n PCA a seleccionar: 
+sum(prop.exp$Eigenvalue>prop.exp$brokenstick)
+
+```
+
+
+```{r pcabsb, exercise=TRUE}
+pca.out <- rda(pizza.data[,-c(1,2)], scale=TRUE)
+
+prop.exp <- data.frame(t(summary(pca.out)$cont$importance))  
+prop.exp$PC <- row.names(prop.exp)
+
+prop.exp$brokenstick <- bstick(pca.out)
+prop.exp$selected <- ifelse(prop.exp$brokenstick<prop.exp$Eigenvalue, "selected", "not selected")
+
+#Cambio fill en función de si está o no seleccionado
+ggplot(prop.exp, aes(x=PC, y=Eigenvalue)) + 
+  geom_col(aes(fill=selected))+
+  geom_line(aes(y=brokenstick, x=1:7), col="red")+
+    geom_point(aes(y=brokenstick, x=1:7), col="red", size=3)+
+  ggtitle("BStick criterion")
+```
+
+### Correlación variables con PC
+
+Puede ser interesante ver qué variables están relacionadas con cada componente principal. 
+
+```{r pcacorPC, exercise=TRUE}
+pca.out <- rda(pizza.data[,-c(1,2)], scale=TRUE)
+  
+k=2 #Dimensiones 
+
+n_dat<-cbind(summary(pca.out)$sites[,1:k],pizza.data[,-c(1,2)])
+
+round(cor(n_dat)[1:k,(k+1):dim(n_dat)[2]],3)
+   
+library(Hmisc)
+rcorr(as.matrix(n_dat))$P[1:k,(k+1):dim(n_dat)[2]]
+```
+
+
+
+## MDS
+
+Multidimensional Scaling es un método similar a PCA con la diferencia de que se pueden utilizar distancias diferentes a la euclidea. En realidad, un MDS realizado con una matriz de distancias euclidea es igual que un PCA.
+
+La distancia euclidea es apta en casos en que la matriz a analizar se componga de variable CONTINUAS y con una distribución relativamente SIMÉTRICA. Por esto en ecología se suele aplicar para analizar variables ambientales. 
+
+En cambio, en el caso de tener una matriz de presencia-absencia o abundancia de diferentes especies NO ES CORRECTO aplicar distancias euclideas ya que tienen datos muy sesgados (muchos ceros y pocos valores muy elevados) y no tienen por qué ser continuos.
+
+Vamos a trabajar con la matriz de composición de especies `spe.data`.
+
+
+### **Transformar los datos**
+
+Obviamente los datos no van a ser perfectos, pero si no los transformamos las especies más abundantes serán las únicas que tendrá en cuenta el modelo. Por eso se recomienda  hacer una transformación del tipo `sqrt` o `log` en los casos más extremos.
+
+```{r MDStrans, exercise=TRUE}
+boxplot(log1p(spe.data), main="Log+1")
+boxplot(sqrt(spe.data), main= "sqrt")
+boxplot((spe.data)^(1/3), main= "x^(1/3)")
+
+spe.trans <- sqrt(spe.data)
+```
+
+### **Cálculo matriz de distancia**
+
+* La distancia más común que se utiliza para analizar matrices de composición de especies es `bray-curtis`. Esta distancia permite tener en cuenta la presencia-absencia y la abundancia. 
+
+* La distancia de `chord` equivale a Bray pero modificando los datos. Da poco peso a especies raras. No está restringida a valores de 0 y 1. 
+
+* La distancia de `hellinger` está restringida a valores entre 0 y 1. No tiene en cuenta dobles ausencias. Tiene muy en cuenta especies poco abundantes. 
+
+
+```{r MDSdist, exercise=TRUE}
+
+spe.trans <- sqrt(spe.data)
+
+library(vegan)
+#ditancia Bray Curtis
+dist.BC <- vegdist(spe.trans)   #ditancia Bray Curtis
+# Chord distance: range 0 .. sqrt(2)
+dist.CH <- vegdist(decostand(datos, "norm"), "euclidean")
+#Hellinger distancia
+dist.H <- vegdist(decostand(sqrt(datos), "norm"), "euclidean")
+
+```
+
+
+### **Cálculo MDS**
+
+A diferencia de un PCA, hay que proporcionar el numero de dimensiones (k). 
+
+```{r MDS, exercise = TRUE}
+out.mds <- cmdscale(dist.BC,eig=T,k=2,add=F)
+out.mds
+```
+
+
+### **Eigenvalues**
+
+Para que los resultados de un MDS sean interpretables la cantidad de eigenvalues negativos tiene que ser reducida. Por eso se calcula `PI`, que representa la proporción de eigenvalue positivo dividido entre el valor absoluto de todos los eigenvalues. 
+
+No hay un consenso de PI límite, pero 75% empieza a ser aconsejable un NMDS. Si hay 50% hay que hacer no métrico seguro. 
+
+```{r MDSeig, exercise=TRUE}
+
+out.mds <- cmdscale(dist.BC,eig=T,k=2,add=F)
+round(out.mds$eig,3) #EIGENVALUES
+
+ev<-out.mds$eig
+PI<-(realPart<-sum(ev[ev>=0])/sum(abs(ev))*100)
+PI # We are good
+```
+
+
+### **GOODNESS OF FIT**
+
+```{r  GOF, exercise=TRUE}
+spe.trans <- sqrt(spe.data)
+dist.BC <- vegdist(spe.trans) 
+
+out.mds <- cmdscale(dist.BC,eig=T,k=2,add=F)
+out.mds$GOF
+
+ggplot()+ geom_point(aes(x=dist.BC, y=dist(out.mds$points)))+ 
+  geom_smooth(aes(x=dist.BC, y=dist(out.mds$points)))
+
+```
+
+
+### **BIPLOT**
+
+```{r  biplotMDS, exercise=TRUE}
+library(BiodiversityR)
+
+spe.trans <- sqrt(spe.data)
+dist.BC <- vegdist(spe.trans) 
+
+out.mds <- cmdscale(dist.BC,eig=T,k=2,add=F)
+out.mds <- add.spec.scores(out.mds,spe.data,method="cor.scores")
+
+mds.data <- data.frame(out.mds$points)
+mds.sp <- data.frame(out.mds$cproj)
+
+ggplot(mds.data, aes(x=X1, y=X2)) + geom_point() + 
+  geom_segment(data=mds.sp, aes(x=0, y=0, xend=Dim1, yend=Dim2)) + 
+  geom_label(data=mds.sp, aes(x=Dim1, y=Dim2, label=row.names(mds.sp)))+
+  xlab("MDS1") + ylab("MDS2")
+
+```
+
+Si quisiéramos añadir una variable al gráfico (por ejemplo, diversidad)
+
+```{r biplotdivMDS, exercise=TRUE}
+library(vegan)
+
+spe.trans <- sqrt(spe.data)
+dist.BC <- vegdist(spe.trans) 
+
+out.mds <- cmdscale(dist.BC,eig=T,k=2,add=F)
+out.mds <- add.spec.scores(out.mds,spe.data,method="cor.scores")
+
+mds.data <- data.frame(out.mds$points)
+mds.sp <- data.frame(out.mds$cproj)
+
+#Calculamos un vector diversity
+div <- diversity(spe.data, index = "shannon")
+
+#y lo añadimos al gráfico
+ggplot(mds.data, aes(x=X1, y=X2)) + geom_point(aes(col=div),size=4) + 
+  scale_colour_gradientn("H", 
+                         colors =c("coral3", "steelblue"))+
+  geom_segment(data=mds.sp, aes(x=0, y=0, xend=Dim1, yend=Dim2)) + 
+  geom_label(data=mds.sp, aes(x=Dim1, y=Dim2, label=row.names(mds.sp)))+
+  xlab("MDS1") + ylab("MDS2")
+
+```
+
+## NMDS
+
+NMDS busca los ejes k que minimizan el estrés de los datos, es decir. que representan las distancias gráficas más parecidas a las reales. Lo hace calculando ejes de forma "al azar", así que pueden cambiar para unos mismos datos o puede no encontrarse una solución óptima. 
+
+### Cálculo NMDS
+```{r nmds, exercise=TRUE}
+library(vegan)
+
+spe.trans <- sqrt(spe.data)
+
+nmds.out <- metaMDS(spe.trans, distance="bray" , k=2,
+                           trymax=50, #Numero de iteraciones
+                           autotransform=FALSE,
+                    wascores = TRUE)
+```
+
+
+### **STRESS**
+
+Podemos ver la cómo de fiable es la representación de los datos con los ejes NMDS comparando la distancia gráfica con la distancia real (`stressplot`). 
+
+El grado de ajuste se puede medir con el `stress`. 
+Si `stress` es 0 reproduce perfectamente la realidad. Si esta sobre el 2.5 es excelente, 5 buena, 10 regular, 20 pobre. 
+
+```{r stressnmds, exercise=TRUE}
+stressplot(nmds.out)
+nmds.out$stress
+```
+
+### **BIPLOT**
+
+```{r biplotdivnMDS, exercise=TRUE}
+library(vegan)
+spe.trans <- sqrt(spe.data)
+
+nmds.out <- metaMDS(spe.trans, distance="bray" , k=2,
+                           trymax=50, #Numero de iteraciones
+                           autotransform=FALSE,
+                    wascores = TRUE)
+
+
+nmds.data <- data.frame(nmds.out$points)
+nmds.sp <- data.frame(nmds.out$species)
+
+
+#y lo añadimos al gráfico
+ggplot(nmds.data, aes(x=MDS1, y=MDS2)) + geom_point() + 
+  geom_segment(data=nmds.sp, aes(x=0, y=0, xend=MDS1, yend=MDS2)) + 
+  geom_label(data=nmds.sp, aes(x=MDS1, y=MDS2, label=row.names(nmds.sp)))
+
+```
+
+
+
+Ambu na altre variable (ex: div)
+```{r biplotMDSdiv, exercise=TRUE}
+library(vegan)
+div <- diversity(spe.data, index = "shannon")
+
+spe.trans <- sqrt(spe.data)
+
+nmds.out <- metaMDS(spe.trans, distance="bray" , k=2,
+                           trymax=50, #Numero de iteraciones
+                           autotransform=FALSE,
+                    wascores = TRUE)
+
+
+nmds.data <- data.frame(nmds.out$points)
+nmds.sp <- data.frame(nmds.out$species)
+
+#y lo añadimos al gráfico
+ggplot(nmds.data, aes(x=MDS1, y=MDS2)) + geom_point(aes(size=div)) + 
+  geom_segment(data=nmds.sp, aes(x=0, y=0, xend=MDS1, yend=MDS2)) + 
+  geom_label(data=nmds.sp, aes(x=MDS1, y=MDS2, label=row.names(nmds.sp)))
+
+```
